@@ -800,11 +800,11 @@ nav {
           <div class="rm-info-row">
             <div class="rm-counter">
               <span class="rm-counter-num" id="slot-pts-num">0</span>
-              <span class="rm-counter-label">今日報名</span>
+              <span class="rm-counter-label">CREDITS</span>
             </div>
             <div class="rm-counter">
-              <span class="rm-counter-num" id="slot-plays-num">—</span>
-              <span class="rm-counter-label">狀態</span>
+              <span class="rm-counter-num" id="slot-plays-num">0</span>
+              <span class="rm-counter-label">PLAYS</span>
             </div>
           </div>
 
@@ -1210,12 +1210,7 @@ function handleWsMessage({ type, payload }) {
       break;
 
     case 'slot_win':
-    case 'slot_enter':
-      if (slotCardId) refreshSlotStatus().then(() => updateSlotUI());
-      break;
-
-    case 'slot_draw':
-      renderSlotHistory();
+    case 'slot_play':
       if (slotCardId) refreshSlotStatus().then(() => updateSlotUI());
       break;
   }
@@ -1954,25 +1949,30 @@ function twHourLocal() {
 function updateSlotUI() {
   if (!slotCardId) return;
 
-  const hasEntered   = slotStatus ? slotStatus.hasEntered   : false;
-  const hasWonToday  = slotStatus ? slotStatus.hasWonToday  : false;
-  const drawDone     = slotStatus ? slotStatus.drawDone     : false;
-  const totalEntries = slotStatus ? slotStatus.totalEntries : 0;
-  const h            = twHourLocal();
-  const isOpen       = h >= 13 && h < 20;
+  const totalPts       = slotStatus ? slotStatus.totalPts       : 0;
+  const availablePlays = slotStatus ? slotStatus.availablePlays : 0;
+  const hasWonToday    = slotStatus ? slotStatus.hasWonToday    : false;
+  const h              = twHourLocal();
+  const isOpen         = h >= 13 && h < 20;
 
-  if (el('slot-pts-num'))   el('slot-pts-num').textContent   = totalEntries;
-  if (el('slot-plays-num')) el('slot-plays-num').textContent = hasEntered ? '✓' : '—';
+  if (el('slot-pts-num'))   el('slot-pts-num').textContent   = totalPts;
+  if (el('slot-plays-num')) el('slot-plays-num').textContent = availablePlays;
 
   if (el('slot-card-sub')) {
-    if (hasWonToday) {
-      el('slot-card-sub').textContent = '🍦 恭喜中獎！今日已得獎！';
-    } else if (hasEntered) {
-      el('slot-card-sub').textContent = '😢 今日未中獎，明天再來！';
+    if (availablePlays > 0) {
+      const sub = hasWonToday
+        ? '🍦 已中獎！還有 ' + availablePlays + ' 次機會繼續抽！'
+        : '積點 ' + totalPts + ' 點 → 可抽 ' + availablePlays + ' 次（每 ' + COST_PER_PLAY + ' 點換 1 次）';
+      el('slot-card-sub').textContent = sub;
     } else if (!isOpen) {
-      el('slot-card-sub').textContent = '報名時間：台灣時間 13:00–20:00';
+      el('slot-card-sub').textContent = '活動時間：台灣時間 13:00–20:00';
     } else {
-      el('slot-card-sub').textContent = '尚未參加，按下按鈕立即抽獎！';
+      const ptsToNext = totalPts % COST_PER_PLAY === 0 && totalPts > 0
+        ? COST_PER_PLAY
+        : COST_PER_PLAY - (totalPts % COST_PER_PLAY);
+      el('slot-card-sub').textContent = hasWonToday
+        ? '🍦 今日已中獎！刷卡再累積 ' + ptsToNext + ' 點可再抽'
+        : '積點 ' + totalPts + ' 點，再刷 ' + ptsToNext + ' 點可抽獎！';
     }
   }
 
@@ -1987,21 +1987,18 @@ function updateSlotUI() {
 
       const btn = el('slot-pull-btn');
       if (btn) {
-        if (hasWonToday) {
+        if (remaining <= 0) {
           btn.disabled = true;
-          btn.textContent = '🍦 恭喜中獎！';
-        } else if (hasEntered) {
-          btn.disabled = true;
-          btn.textContent = '😢 今日未中獎，明天再來！';
+          btn.textContent = '🍦 今日獎品已全數送出！';
         } else if (!isOpen) {
           btn.disabled = true;
           btn.textContent = '活動時間 13:00–20:00';
-        } else if (remaining <= 0) {
+        } else if (availablePlays <= 0) {
           btn.disabled = true;
-          btn.textContent = '🍦 今日獎品已全數送出！';
+          btn.textContent = totalPts < COST_PER_PLAY ? '積點不足，繼續刷卡！' : '今日次數已用完';
         } else {
           btn.disabled = false;
-          btn.textContent = '🎰 拉霸！立即抽獎！';
+          btn.textContent = '🎰 拉霸！PULL！（還有 ' + availablePlays + ' 次）';
         }
       }
     })
@@ -2042,8 +2039,8 @@ async function pullSlot() {
   if (slotPlaying) return;
   if (!slotCardId) { showToast('請先輸入卡號查詢！', 'warning'); return; }
 
-  const hasEntered = slotStatus ? slotStatus.hasEntered : false;
-  if (hasEntered)  { showToast('今日已參與過！', 'warning'); return; }
+  const availablePlays = slotStatus ? slotStatus.availablePlays : 0;
+  if (availablePlays <= 0) { showToast('次數不足，繼續刷卡累積積點！', 'warning'); return; }
 
   slotPlaying = true;
   const btn = el('slot-pull-btn');
@@ -2052,22 +2049,23 @@ async function pullSlot() {
   const resultEl = el('slot-result-msg');
   if (resultEl) resultEl.style.display = 'none';
 
+  // 先樂觀扣除，讓 UI 即時反應
+  if (slotStatus) slotStatus.availablePlays = Math.max(0, slotStatus.availablePlays - 1);
+
   // Lever animation
   const pole = el('rm-lever-pole');
   if (pole) { pole.classList.add('pulled'); setTimeout(() => pole.classList.remove('pulled'), 400); }
 
-  // Lights
   const lights = el('rm-lights');
   if (lights) lights.classList.add('flashing');
 
   try {
-    const result = await api('POST', '/api/slot/enter', { cardId: slotCardId });
+    const result = await api('POST', '/api/slot/play', { cardId: slotCardId });
     const isWin  = result.isWin;
 
-    // Sync authoritative counts from server
+    // 同步伺服器正確數值
     await refreshSlotStatus();
 
-    // Build final symbols based on result
     let finalSymbols;
     if (isWin) {
       finalSymbols = [ICE_CREAM, ICE_CREAM, ICE_CREAM];
@@ -2078,7 +2076,6 @@ async function pullSlot() {
         pool[Math.floor(Math.random() * pool.length)],
         pool[Math.floor(Math.random() * pool.length)],
       ];
-      // 避免三個相同（防誤以為中獎）
       if (finalSymbols[0] === finalSymbols[1] && finalSymbols[1] === finalSymbols[2]) {
         finalSymbols[2] = pool.find(s => s !== finalSymbols[0]) || '🎁';
       }
@@ -2093,7 +2090,10 @@ async function pullSlot() {
         showSlotResult('🍦 恭喜中獎！獲得一杯冰淇淋！', 'win');
         renderSlotHistory();
       } else {
-        const msgs = ['😢 差一點！繼續加油！', '🌈 沒中沒關係，明天再來！', '🎈 運氣躲起來了！', '⭐ 下次一定中！', '🍭 明天再試試！'];
+        const left = slotStatus ? slotStatus.availablePlays : 0;
+        const msgs = left > 0
+          ? ['😢 差一點！還有 ' + left + ' 次，繼續加油！', '🌈 沒中！還有 ' + left + ' 次機會！', '🎈 再來一次！還剩 ' + left + ' 次！']
+          : ['😢 次數用完！刷卡累積積點再來！', '🍭 明天繼續加油！', '⭐ 刷卡多累積點數，下次更多機會！'];
         showSlotResult(msgs[Math.floor(Math.random() * msgs.length)], 'lose');
       }
       updateSlotUI();
