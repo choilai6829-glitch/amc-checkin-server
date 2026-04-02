@@ -2045,7 +2045,7 @@ async function pullSlot() {
   if (!slotCardId) { showToast('請先輸入卡號查詢！', 'warning'); return; }
 
   const hasEntered = slotStatus ? slotStatus.hasEntered : false;
-  if (hasEntered)  { showToast('今日已報名，等待抽獎結果！', 'warning'); return; }
+  if (hasEntered)  { showToast('今日已參與過！', 'warning'); return; }
 
   slotPlaying = true;
   const btn = el('slot-pull-btn');
@@ -2063,23 +2063,41 @@ async function pullSlot() {
   if (lights) lights.classList.add('flashing');
 
   try {
-    await api('POST', '/api/slot/enter', { cardId: slotCardId });
+    const result = await api('POST', '/api/slot/enter', { cardId: slotCardId });
+    const isWin  = result.isWin;
 
     // Sync authoritative counts from server
     await refreshSlotStatus();
 
-    // Decorative spin
-    const pool = SLOT_SYMBOLS.filter(s => s !== ICE_CREAM);
-    const finalSymbols = [
-      pool[Math.floor(Math.random() * pool.length)],
-      pool[Math.floor(Math.random() * pool.length)],
-      pool[Math.floor(Math.random() * pool.length)],
-    ];
+    // Build final symbols based on result
+    let finalSymbols;
+    if (isWin) {
+      finalSymbols = [ICE_CREAM, ICE_CREAM, ICE_CREAM];
+    } else {
+      const pool = SLOT_SYMBOLS.filter(s => s !== ICE_CREAM);
+      finalSymbols = [
+        pool[Math.floor(Math.random() * pool.length)],
+        pool[Math.floor(Math.random() * pool.length)],
+        pool[Math.floor(Math.random() * pool.length)],
+      ];
+      // 避免三個相同（防誤以為中獎）
+      if (finalSymbols[0] === finalSymbols[1] && finalSymbols[1] === finalSymbols[2]) {
+        finalSymbols[2] = pool.find(s => s !== finalSymbols[0]) || '🎁';
+      }
+    }
 
     animateReels(finalSymbols, () => {
       if (lights) lights.classList.remove('flashing');
       slotPlaying = false;
-      showSlotResult('✅ 報名成功！等待今日抽獎結果！', 'win');
+      if (isWin) {
+        fireConfetti();
+        showWinOverlay(slotCardId);
+        showSlotResult('🍦 恭喜中獎！獲得一杯冰淇淋！', 'win');
+        renderSlotHistory();
+      } else {
+        const msgs = ['😢 差一點！繼續加油！', '🌈 沒中沒關係，明天再來！', '🎈 運氣躲起來了！', '⭐ 下次一定中！', '🍭 明天再試試！'];
+        showSlotResult(msgs[Math.floor(Math.random() * msgs.length)], 'lose');
+      }
       updateSlotUI();
     });
 
