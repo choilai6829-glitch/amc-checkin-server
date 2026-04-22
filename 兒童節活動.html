@@ -1538,15 +1538,8 @@ function showCheckinCard(cardId, name, totalPts, isSlotUnlock) {
     overlay.classList.remove('cc-show');
     setTimeout(() => {
       overlay.remove();
-      if (isSlotUnlock) {
-        showPage('slot');
-        const inp = el('slot-card-input');
-        if (inp) inp.value = cardId;
-        lookupSlotCard();
-      } else {
-        const inp2 = el('card-input');
-        if (inp2) inp2.focus();
-      }
+      const inp2 = el('card-input');
+if (inp2) inp2.focus();
     }, 400);
   }, 2000);
 }
